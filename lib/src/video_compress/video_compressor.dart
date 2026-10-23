@@ -112,6 +112,11 @@ extension Compress on IVideoCompress {
   /// determine whether to delete his source file by [deleteOrigin]
   /// optional parameters [startTime] [duration] [includeAudio] [frameRate]
   ///
+  /// [startTime] and [duration] trim the video, to the millisecond. Either
+  /// may be left out: the trim then starts at the beginning, or runs to the
+  /// end. The result is re-encoded, so it starts on the exact frame rather
+  /// than on the keyframe before it.
+  ///
   /// ## example
   /// ```dart
   /// final info = await _flutterVideoCompress.compressVideo(
@@ -124,15 +129,17 @@ extension Compress on IVideoCompress {
     String path, {
     VideoQuality quality = VideoQuality.DefaultQuality,
     bool deleteOrigin = false,
-    int? startTime,
-    int? duration,
+    Duration? startTime,
+    Duration? duration,
     bool? includeAudio,
     int frameRate = 30,
   }) async {
     if (isCompressing) {
-      throw StateError('''VideoCompress Error: 
+      throw StateError(
+        '''VideoCompress Error: 
       Method: compressVideo
-      Already have a compression process, you need to wait for the process to finish or stop it''');
+      Already have a compression process, you need to wait for the process to finish or stop it''',
+      );
     }
 
     if (compressProgress$.notSubscribed) {
@@ -146,8 +153,8 @@ extension Compress on IVideoCompress {
       'path': path,
       'quality': quality.index,
       'deleteOrigin': deleteOrigin,
-      'startTime': startTime,
-      'duration': duration,
+      'startTimeMs': startTime?.inMilliseconds,
+      'durationMs': duration?.inMilliseconds,
       'includeAudio': includeAudio,
       'frameRate': frameRate,
     });
@@ -176,8 +183,6 @@ extension Compress on IVideoCompress {
   }
 
   Future<void> setLogLevel(int logLevel) async {
-    return await _invoke<void>('setLogLevel', {
-      'logLevel': logLevel,
-    });
+    return await _invoke<void>('setLogLevel', {'logLevel': logLevel});
   }
 }

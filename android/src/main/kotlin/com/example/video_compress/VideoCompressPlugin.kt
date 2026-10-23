@@ -1,6 +1,8 @@
 package com.example.video_compress
 
 import android.content.Context
+import android.media.MediaFormat
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.util.Log
 import com.otaliastudios.transcoder.Transcoder
@@ -10,6 +12,7 @@ import com.otaliastudios.transcoder.source.UriDataSource
 import com.otaliastudios.transcoder.strategy.DefaultAudioStrategy
 import com.otaliastudios.transcoder.strategy.DefaultVideoStrategy
 import com.otaliastudios.transcoder.strategy.RemoveTrackStrategy
+import com.otaliastudios.transcoder.common.TrackStatus
 import com.otaliastudios.transcoder.strategy.TrackStrategy
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.BinaryMessenger
@@ -78,8 +81,8 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 val path = call.argument<String>("path")!!
                 val quality = call.argument<Int>("quality")!!
                 val deleteOrigin = call.argument<Boolean>("deleteOrigin")!!
-                val startTime = call.argument<Int>("startTime")
-                val duration = call.argument<Int>("duration")
+                val startTimeMs = call.argument<Number>("startTimeMs")?.toLong()
+                val durationMs = call.argument<Number>("durationMs")?.toLong()
                 val includeAudio = call.argument<Boolean>("includeAudio") ?: true
                 val frameRate = if (call.argument<Int>("frameRate")==null) 30 else call.argument<Int>("frameRate")
 
@@ -87,7 +90,8 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 val out = SimpleDateFormat("yyyy-MM-dd hh-mm-ss").format(Date())
                 val destPath: String = tempDir + File.separator + "VID_" + out + path.hashCode() + ".mp4"
 
-                var videoTrackStrategy: TrackStrategy = DefaultVideoStrategy.atMost(340).build();
+                var videoTrackStrategy: TrackStrategy = DefaultVideoStrategy.atMost(340).build()
+                val trimming = startTimeMs != null || durationMs != null
                 val audioTrackStrategy: TrackStrategy
 
                 when (quality) {
@@ -137,10 +141,19 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                     RemoveTrackStrategy()
                 }
 
-                val dataSource = if (startTime != null || duration != null){
+                if (trimming) {
+                    videoTrackStrategy = ReencodingStrategy(videoTrackStrategy)
+                }
+
+                val dataSource = if (trimming) {
+                    // TrimDataSource takes what to cut off either end, in
+                    // microseconds: the end is not the duration.
                     val source = UriDataSource(context, Uri.parse(path))
-                    TrimDataSource(source, (1000 * 1000 * (startTime ?: 0)).toLong(), (1000 * 1000 * (duration ?: 0)).toLong())
-                }else{
+                    val totalUs = durationUs(path)
+                    val startUs = (startTimeMs ?: 0L) * 1000
+                    val endUs = if (durationMs != null) Math.min(totalUs, startUs + durationMs * 1000) else totalUs
+                    TrimDataSource(source, startUs, Math.max(0L, totalUs - endUs))
+                } else {
                     UriDataSource(context, Uri.parse(path))
                 }
 
@@ -199,4 +212,29 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
         private const val TAG = "video_compress"
     }
 
+}
+
+/** How long the video at [path] is, in microseconds. */
+private fun durationUs(path: String): Long {
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(path)
+        val ms = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+        return ms * 1000
+    } finally {
+        retriever.release()
+    }
+}
+
+/**
+ * Re-encodes a video [delegate] would copy as it is. A copied track can only
+ * start on a keyframe, so a trim of it would start up to seconds early;
+ * decoded, the frames before the start are dropped.
+ */
+private class ReencodingStrategy(private val delegate: TrackStrategy) : TrackStrategy {
+    override fun createOutputFormat(inputFormats: List<MediaFormat>, outputFormat: MediaFormat): TrackStatus {
+        // DefaultVideoStrategy passes only a single input through: with more
+        // than one, each would be copied with its own format.
+        return delegate.createOutputFormat(inputFormats + inputFormats, outputFormat)
+    }
 }

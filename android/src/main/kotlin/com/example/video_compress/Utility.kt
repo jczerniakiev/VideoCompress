@@ -76,38 +76,39 @@ class Utility(private val channelName: String) {
         return json
     }
 
-    fun getBitmap(path: String, position: Long, result: MethodChannel.Result): Bitmap {
-        var bitmap: Bitmap? = null
+    /**
+     * The frame at [positionMs], at most 512px on its longer side; a negative
+     * position is any frame the retriever picks. Null when there is none, or
+     * the file cannot be read.
+     */
+    fun getBitmap(path: String, positionMs: Long): Bitmap? {
         val retriever = MediaMetadataRetriever()
-
-        try {
+        var bitmap: Bitmap? = try {
             retriever.setDataSource(path)
-            bitmap = retriever.getFrameAtTime(position, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
-        } catch (ex: IllegalArgumentException) {
-            result.error(channelName, "Assume this is a corrupt video file", null)
+            // The retriever works in microseconds, and the closest frame, not
+            // the closest keyframe, is the one at the position.
+            if (positionMs < 0) retriever.frameAtTime
+            else retriever.getFrameAtTime(positionMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
         } catch (ex: RuntimeException) {
-            result.error(channelName, "Assume this is a corrupt video file", null)
+            // a corrupt video file
+            null
         } finally {
             try {
                 retriever.release()
             } catch (ex: RuntimeException) {
-                result.error(channelName, "Ignore failures while cleaning up", null)
+                // ignore failures while cleaning up
             }
         }
 
-        if (bitmap == null) result.success(emptyArray<Int>())
-
-        val width = bitmap!!.width
-        val height = bitmap.height
-        val max = Math.max(width, height)
+        val frame = bitmap ?: return null
+        val max = Math.max(frame.width, frame.height)
         if (max > 512) {
             val scale = 512f / max
-            val w = Math.round(scale * width)
-            val h = Math.round(scale * height)
-            bitmap = Bitmap.createScaledBitmap(bitmap, w, h, true)
+            bitmap = Bitmap.createScaledBitmap(frame, Math.round(scale * frame.width),
+                    Math.round(scale * frame.height), true)
         }
 
-        return bitmap!!
+        return bitmap
     }
 
     fun getFileNameWithGifExtension(path: String): String {

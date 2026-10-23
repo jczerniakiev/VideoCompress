@@ -38,8 +38,9 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             let path = args!["path"] as! String
             let quality = args!["quality"] as! NSNumber
             let deleteOrigin = args!["deleteOrigin"] as! Bool
-            let startTime = args!["startTime"] as? Double
-            let duration = args!["duration"] as? Double
+            // Sent in milliseconds; the export works in seconds.
+            let startTime = (args!["startTimeMs"] as? NSNumber).map { $0.doubleValue / 1000 }
+            let duration = (args!["durationMs"] as? NSNumber).map { $0.doubleValue / 1000 }
             let includeAudio = args!["includeAudio"] as? Bool
             let frameRate = args!["frameRate"] as? Int
             compressVideo(path, quality, deleteOrigin, startTime, duration, includeAudio,
@@ -59,13 +60,16 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
     private func getBitMap(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult)-> Data?  {
         let url = Utility.getPathUrl(path)
         let asset = avController.getVideoAsset(url)
-        guard let track = avController.getTrack(asset) else { return nil }
+        guard avController.getTrack(asset) != nil else { return nil }
         
         let assetImgGenerate = AVAssetImageGenerator(asset: asset)
         assetImgGenerate.appliesPreferredTrackTransform = true
         
-        let timeScale = CMTimeScale(track.nominalFrameRate)
-        let time = CMTimeMakeWithSeconds(Float64(truncating: position),preferredTimescale: timeScale)
+        // The frame at the very position, in milliseconds, not the nearest
+        // keyframe. A negative one (the default) is the first frame.
+        assetImgGenerate.requestedTimeToleranceBefore = .zero
+        assetImgGenerate.requestedTimeToleranceAfter = .zero
+        let time = CMTimeMake(value: max(0, Int64(truncating: position)), timescale: 1000)
         guard let img = try? assetImgGenerate.copyCGImage(at:time, actualTime: nil) else {
             return nil
         }
@@ -75,9 +79,8 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
     }
     
     private func getByteThumbnail(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult) {
-        if let bitmap = getBitMap(path,quality,position,result) {
-            result(bitmap)
-        }
+        // Answers even when there is no frame, or the call never returns.
+        result(getBitMap(path,quality,position,result))
     }
     
     private func getFileThumbnail(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult) {
@@ -192,7 +195,7 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         
         let videoDuration = sourceVideoAsset.duration.seconds
         let minDuration = Double(duration ?? videoDuration)
-        let maxDurationTime = minStartTime + minDuration < videoDuration ? minDuration : videoDuration
+        let maxDurationTime = min(minDuration, videoDuration - minStartTime)
         
         let cmStartTime = CMTimeMakeWithSeconds(minStartTime, preferredTimescale: timescale)
         let cmDurationTime = CMTimeMakeWithSeconds(maxDurationTime, preferredTimescale: timescale)
@@ -209,12 +212,16 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
         exporter.shouldOptimizeForNetworkUse = true
         
         if frameRate != nil {
-            let videoComposition = AVMutableVideoComposition(propertiesOf: sourceVideoAsset)
+            // Of what is exported: without audio that is the composition, whose
+            // track is not the source's.
+            let videoComposition = AVMutableVideoComposition(propertiesOf: session)
             videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
             exporter.videoComposition = videoComposition
         }
         
-        if !isIncludeAudio {
+        // Without audio the composition holds just the range, from zero; with
+        // it the source is exported, and cut to the range here.
+        if isIncludeAudio {
             exporter.timeRange = timeRange
         }
         
