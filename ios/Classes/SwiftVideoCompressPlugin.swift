@@ -215,6 +215,11 @@ public class SwiftVideoCompressPlugin: NSObject, FlutterPlugin {
             // Of what is exported: without audio that is the composition, whose
             // track is not the source's.
             let videoComposition = AVMutableVideoComposition(propertiesOf: session)
+            // Upright, as the source shows. For a composition the render size
+            // comes out as the stored size, unturned: a portrait video was cut
+            // into a landscape frame, black down one side.
+            let size = sourceVideoTrack!.naturalSize.applying(sourceVideoTrack!.preferredTransform)
+            videoComposition.renderSize = CGSize(width: abs(size.width), height: abs(size.height))
             videoComposition.frameDuration = CMTimeMake(value: 1, timescale: Int32(frameRate!))
             exporter.videoComposition = videoComposition
         }
