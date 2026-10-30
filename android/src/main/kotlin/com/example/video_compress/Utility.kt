@@ -77,9 +77,9 @@ class Utility(private val channelName: String) {
     }
 
     /**
-     * The frame at [positionMs], at most 512px on its longer side; a negative
-     * position is any frame the retriever picks. Null when there is none, or
-     * the file cannot be read.
+     * The frame at [positionMs], at most 1920px on its longer side: enough for
+     * a preview that fills a screen. A negative position is any frame the
+     * retriever picks. Null when there is none, or the file cannot be read.
      */
     fun getBitmap(path: String, positionMs: Long): Bitmap? {
         val retriever = MediaMetadataRetriever()
@@ -102,8 +102,8 @@ class Utility(private val channelName: String) {
 
         val frame = bitmap ?: return null
         val max = Math.max(frame.width, frame.height)
-        if (max > 512) {
-            val scale = 512f / max
+        if (max > 1920) {
+            val scale = 1920f / max
             bitmap = Bitmap.createScaledBitmap(frame, Math.round(scale * frame.width),
                     Math.round(scale * frame.height), true)
         }
