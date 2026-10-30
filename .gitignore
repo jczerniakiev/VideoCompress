@@ -35,3 +35,5 @@ GeneratedPluginRegistrant.m
 GeneratedPluginRegistrant.java
 build/
 .flutter-plugins
+.build/
+.swiftpm/
