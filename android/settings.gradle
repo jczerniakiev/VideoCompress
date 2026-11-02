@@ -1,1 +1,16 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+// Keep in sync with the buildscript classpath in build.gradle. `flutter analyze --suggestions`
+// reads the AGP/KGP versions of a plugin from here.
+plugins {
+    id "com.android.library" version "9.1.0" apply false
+    id "org.jetbrains.kotlin.android" version "2.4.0" apply false
+}
+
 rootProject.name = 'video_compress'
