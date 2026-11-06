@@ -66,7 +66,10 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 result.success(Utility(channelName).getMediaInfoJson(context, path!!).toString())
             }
             "deleteAllCache" -> {
-                result.success(Utility(channelName).deleteAllCache(context, result));
+                // deleteAllCache answers through result itself; answering again
+                // with its Unit return failed in the codec ("Unsupported value:
+                // kotlin.Unit") and then with "Reply already submitted".
+                Utility(channelName).deleteAllCache(context, result)
             }
             "setLogLevel" -> {
                 val logLevel = call.argument<Int>("logLevel")!!
