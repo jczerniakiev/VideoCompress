@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import com.otaliastudios.transcoder.Transcoder
 import com.otaliastudios.transcoder.TranscoderListener
@@ -23,6 +25,8 @@ import io.flutter.plugin.common.MethodChannel.MethodCallHandler
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
 /**
@@ -38,6 +42,43 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
     private var transcodeFuture:Future<Void>? = null
     var channelName = "video_compress"
 
+    /**
+     * Reading a frame or a file's media info takes long (a frame is decoded
+     * from the keyframe before it). On the main thread it held up input and
+     * everything else waiting on that thread. They run here instead, one at a
+     * time as before, and answer on the main thread.
+     */
+    private val fileExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /**
+     * Runs [work] on [fileExecutor], with a result that answers on the main
+     * thread. What it throws goes back as an error, as it did when thrown
+     * from [onMethodCall]: without an answer the call would never end.
+     */
+    private fun offMain(result: MethodChannel.Result, work: (MethodChannel.Result) -> Unit) {
+        val answer = object : MethodChannel.Result {
+            override fun success(value: Any?) {
+                mainHandler.post { result.success(value) }
+            }
+
+            override fun error(code: String, message: String?, details: Any?) {
+                mainHandler.post { result.error(code, message, details) }
+            }
+
+            override fun notImplemented() {
+                mainHandler.post { result.notImplemented() }
+            }
+        }
+        fileExecutor.execute {
+            try {
+                work(answer)
+            } catch (e: Exception) {
+                answer.error("error", e.message, null)
+            }
+        }
+    }
+
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         val context = _context;
         val channel = _channel;
@@ -52,7 +93,9 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
                 val path = call.argument<String>("path")
                 val quality = call.argument<Int>("quality")!!
                 val position = call.argument<Int>("position")!! // to long
-                ThumbnailUtility(channelName).getByteThumbnail(path!!, quality, position.toLong(), result)
+                offMain(result) {
+                    ThumbnailUtility(channelName).getByteThumbnail(path!!, quality, position.toLong(), it)
+                }
             }
             "getFileThumbnail" -> {
                 val path = call.argument<String>("path")
@@ -63,7 +106,9 @@ class VideoCompressPlugin : MethodCallHandler, FlutterPlugin {
             }
             "getMediaInfo" -> {
                 val path = call.argument<String>("path")
-                result.success(Utility(channelName).getMediaInfoJson(context, path!!).toString())
+                offMain(result) {
+                    it.success(Utility(channelName).getMediaInfoJson(context, path!!).toString())
+                }
             }
             "deleteAllCache" -> {
                 // deleteAllCache answers through result itself; answering again

@@ -7,6 +7,12 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
     private var stopCommand = false
     private let channel: FlutterMethodChannel
     private let avController = AvController()
+    /// Reading a frame or a file's media info takes ~150 ms (a frame is decoded
+    /// from the keyframe before it, at full size). On the main thread that
+    /// blocked Flutter's frames whenever a platform view, such as a video
+    /// player, was on screen. They run here instead, one at a time as before,
+    /// and answer on the main thread.
+    private let fileQueue = DispatchQueue(label: "video_compress.files", qos: .userInitiated)
     
     init(channel: FlutterMethodChannel) {
         self.channel = channel
@@ -57,7 +63,15 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         }
     }
     
-    private func getBitMap(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult)-> Data?  {
+    /// Answers `result` on the main thread with what `work` gives on `fileQueue`.
+    private func answerOffMain(_ result: @escaping FlutterResult, _ work: @escaping () -> Any?) {
+        fileQueue.async {
+            let value = work()
+            DispatchQueue.main.async { result(value) }
+        }
+    }
+
+    private func getBitMap(_ path: String,_ quality: NSNumber,_ position: NSNumber)-> Data?  {
         let url = Utility.getPathUrl(path)
         let asset = avController.getVideoAsset(url)
         guard avController.getTrack(asset) != nil else { return nil }
@@ -78,16 +92,16 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         return thumbnail.jpegData(compressionQuality: compressionQuality)
     }
     
-    private func getByteThumbnail(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult) {
+    private func getByteThumbnail(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: @escaping FlutterResult) {
         // Answers even when there is no frame, or the call never returns.
-        result(getBitMap(path,quality,position,result))
+        answerOffMain(result) { self.getBitMap(path, quality, position) }
     }
     
     private func getFileThumbnail(_ path: String,_ quality: NSNumber,_ position: NSNumber,_ result: FlutterResult) {
         let fileName = Utility.getFileName(path)
         let url = Utility.getPathUrl("\(Utility.basePath())/\(fileName).jpg")
         Utility.deleteFile(path)
-        if let bitmap = getBitMap(path,quality,position,result) {
+        if let bitmap = getBitMap(path,quality,position) {
             guard (try? bitmap.write(to: url)) != nil else {
                 return result(FlutterError(code: channelName,message: "getFileThumbnail error",details: "getFileThumbnail error"))
             }
@@ -129,10 +143,8 @@ public class VideoCompressPlugin: NSObject, FlutterPlugin {
         return dictionary
     }
     
-    private func getMediaInfo(_ path: String,_ result: FlutterResult) {
-        let json = getMediaInfoJson(path)
-        let string = Utility.keyValueToJson(json)
-        result(string)
+    private func getMediaInfo(_ path: String,_ result: @escaping FlutterResult) {
+        answerOffMain(result) { Utility.keyValueToJson(self.getMediaInfoJson(path)) }
     }
     
     
